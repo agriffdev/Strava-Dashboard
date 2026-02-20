@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Physical Intelligence — Strava Dashboard</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
 <style>
   :root {
     --orange: #FC4C02;
@@ -612,6 +613,19 @@
 
   .full-width { grid-column: 1 / -1; }
   .tag { display: inline-block; background: var(--orange-dim); color: var(--orange); font-family: var(--mono); font-size: 10px; letter-spacing: 1px; padding: 2px 8px; border-radius: 3px; margin-right: 6px; }
+
+  /* Map panel */
+  #map {
+    height: 320px;
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--surface2);
+  }
+  .map-meta { display: flex; gap: 24px; margin-top: 16px; flex-wrap: wrap; }
+  .map-stat-label { font-family: var(--mono); font-size: 10px; color: var(--muted); letter-spacing: 1px; margin-bottom: 2px; }
+  .map-stat-val { font-family: var(--display); font-size: 28px; color: var(--text); }
+  .map-stat-unit { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .leaflet-tile { filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(1.1); }
 </style>
 </head>
 <body>
@@ -709,12 +723,12 @@
     <div class="stat-card">
       <div class="stat-label">Total Distance</div>
       <div class="stat-value" id="stat-dist">—</div>
-      <div class="stat-unit">kilometres</div>
+      <div class="stat-unit">miles</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Total Elevation</div>
       <div class="stat-value" id="stat-elev">—</div>
-      <div class="stat-unit">metres climbed</div>
+      <div class="stat-unit">feet climbed</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Total Time</div>
@@ -724,12 +738,12 @@
     <div class="stat-card">
       <div class="stat-label">Avg Pace</div>
       <div class="stat-value" id="stat-pace">—</div>
-      <div class="stat-unit">min/km average</div>
+      <div class="stat-unit">min/mile average</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Longest Run</div>
       <div class="stat-value" id="stat-longest">—</div>
-      <div class="stat-unit">kilometres</div>
+      <div class="stat-unit">miles</div>
     </div>
   </div>
 
@@ -743,10 +757,17 @@
     <button class="btn-insight" onclick="getInsight()" id="insight-btn" style="display:none">↻ REGENERATE INSIGHT</button>
   </div>
 
+  <!-- Most Recent Run Map -->
+  <div class="panel" style="margin-bottom:24px" id="map-panel">
+    <div class="panel-title">Most Recent Run</div>
+    <div id="map"></div>
+    <div class="map-meta" id="map-meta"></div>
+  </div>
+
   <!-- Charts + Recent -->
   <div class="two-col">
     <div class="panel">
-      <div class="panel-title">Monthly Distance (km)</div>
+      <div class="panel-title">Monthly Distance (mi)</div>
       <div class="bar-chart" id="month-bars"></div>
     </div>
     <div class="panel">
@@ -764,8 +785,8 @@
   </div>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
-// ─── State ────────────────────────────────────────────────────────────────────
 let accessToken = null;
 let allActivities = [];
 let athleteData = null;
@@ -919,20 +940,23 @@ function renderDashboard() {
   document.getElementById('last-updated').textContent =
     'SYNCED ' + new Date().toLocaleString().toUpperCase();
 
-  // Aggregate stats
-  const totalDist = runs.reduce((s, a) => s + a.distance, 0) / 1000;
-  const totalElev = runs.reduce((s, a) => s + (a.total_elevation_gain || 0), 0);
+  // Aggregate stats — miles
+  const KM_TO_MI = 0.621371;
+  const M_TO_FT = 3.28084;
+  const totalDistMi = runs.reduce((s, a) => s + a.distance, 0) / 1000 * KM_TO_MI;
+  const totalElev = runs.reduce((s, a) => s + (a.total_elevation_gain || 0), 0) * M_TO_FT;
   const totalTime = runs.reduce((s, a) => s + a.moving_time, 0);
-  const longestRun = Math.max(...runs.map(a => a.distance)) / 1000;
+  const longestRun = Math.max(...runs.map(a => a.distance)) / 1000 * KM_TO_MI;
 
-  // Avg pace (min/km) from moving_time and distance
+  // Avg pace (min/mile)
   const totalDistM = runs.reduce((s, a) => s + a.distance, 0);
-  const avgPaceSec = totalDistM > 0 ? (totalTime / (totalDistM / 1000)) : 0;
+  const totalDistMiles = totalDistM / 1609.344;
+  const avgPaceSec = totalDistMiles > 0 ? (totalTime / totalDistMiles) : 0;
   const avgPaceMin = Math.floor(avgPaceSec / 60);
   const avgPaceSec2 = Math.round(avgPaceSec % 60);
 
   document.getElementById('stat-count').textContent = runs.length;
-  document.getElementById('stat-dist').textContent = totalDist.toFixed(0);
+  document.getElementById('stat-dist').textContent = totalDistMi.toFixed(0);
   document.getElementById('stat-elev').textContent = totalElev.toFixed(0);
   document.getElementById('stat-time').textContent = (totalTime / 3600).toFixed(0);
   document.getElementById('stat-pace').textContent =
@@ -947,6 +971,9 @@ function renderDashboard() {
 
   // Best efforts / PRs
   renderBestEfforts(runs);
+
+  // Most recent run map
+  renderRunMap(runs[0]);
 }
 
 function renderMonthChart(runs) {
@@ -954,11 +981,10 @@ function renderMonthChart(runs) {
   runs.forEach(r => {
     const d = new Date(r.start_date);
     const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-    months[key] = (months[key] || 0) + r.distance / 1000;
+    months[key] = (months[key] || 0) + (r.distance / 1609.344);
   });
 
   const sorted = Object.entries(months).sort((a,b) => a[0].localeCompare(b[0]));
-  // Last 12 months
   const recent = sorted.slice(-12);
   const maxVal = Math.max(...recent.map(m => m[1]));
 
@@ -972,7 +998,7 @@ function renderMonthChart(runs) {
     const pct = (val / maxVal) * 100;
     const wrap = document.createElement('div');
     wrap.className = 'bar-wrap';
-    wrap.title = `${monthNames[parseInt(mo)-1]} ${yr}: ${val.toFixed(1)} km`;
+    wrap.title = `${monthNames[parseInt(mo)-1]} ${yr}: ${val.toFixed(1)} mi`;
     wrap.innerHTML = `
       <div class="bar" style="height:${pct}%"></div>
       <div class="bar-label">${monthNames[parseInt(mo)-1]}</div>
@@ -986,14 +1012,15 @@ function renderRecentActivities(runs) {
   container.innerHTML = '';
 
   runs.forEach(r => {
-    const dist = (r.distance / 1000).toFixed(2);
+    const distMi = (r.distance / 1609.344).toFixed(2);
     const pace = r.distance > 0
       ? (() => {
-          const s = r.moving_time / (r.distance / 1000);
-          return `${Math.floor(s/60)}:${String(Math.round(s%60)).padStart(2,'0')}/km`;
+          const miles = r.distance / 1609.344;
+          const s = r.moving_time / miles;
+          return `${Math.floor(s/60)}:${String(Math.round(s%60)).padStart(2,'0')}/mi`;
         })()
       : '—';
-    const date = new Date(r.start_date).toLocaleDateString('en-GB', { day:'numeric', month:'short' });
+    const date = new Date(r.start_date).toLocaleDateString('en-US', { day:'numeric', month:'short' });
 
     const el = document.createElement('div');
     el.className = 'activity-item';
@@ -1002,7 +1029,7 @@ function renderRecentActivities(runs) {
         <div class="activity-name">${r.name}</div>
         <div class="activity-date">${date}</div>
       </div>
-      <div class="activity-dist">${dist}<span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">km</span></div>
+      <div class="activity-dist">${distMi}<span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">mi</span></div>
       <div class="activity-pace">${pace}</div>
     `;
     container.appendChild(el);
@@ -1068,22 +1095,21 @@ async function getInsight() {
 
   // Build summary for Claude
   const runs = allActivities;
-  const totalDist = (runs.reduce((s, a) => s + a.distance, 0) / 1000).toFixed(1);
+  const totalDistMi = (runs.reduce((s, a) => s + a.distance, 0) / 1609.344).toFixed(1);
   const totalRuns = runs.length;
-  const avgDist = (totalDist / totalRuns).toFixed(1);
+  const avgDistMi = (totalDistMi / totalRuns).toFixed(1);
 
-  // Monthly breakdown last 6 months
   const monthlyData = {};
   runs.forEach(r => {
     const d = new Date(r.start_date);
     const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-    monthlyData[key] = (monthlyData[key] || 0) + r.distance / 1000;
+    monthlyData[key] = (monthlyData[key] || 0) + r.distance / 1609.344;
   });
   const recentMonths = Object.entries(monthlyData).sort((a,b) => a[0].localeCompare(b[0])).slice(-6);
 
   const paceData = runs.filter(r => r.distance > 0).map(r => ({
-    dist: (r.distance/1000).toFixed(1),
-    pace: (r.moving_time / (r.distance / 1000)).toFixed(0),
+    dist: (r.distance/1609.344).toFixed(2),
+    pace: (r.moving_time / (r.distance / 1609.344)).toFixed(0),
     date: r.start_date.slice(0,10)
   })).slice(-20);
 
@@ -1091,14 +1117,14 @@ async function getInsight() {
 
 Athlete: ${athleteData.firstname} ${athleteData.lastname}
 Total runs: ${totalRuns}
-Total distance: ${totalDist} km
-Average run distance: ${avgDist} km
+Total distance: ${totalDistMi} miles
+Average run distance: ${avgDistMi} miles
 
 Monthly distances (last 6 months):
-${recentMonths.map(([k,v]) => `${k}: ${v.toFixed(1)} km`).join('\n')}
+${recentMonths.map(([k,v]) => `${k}: ${v.toFixed(1)} miles`).join('\n')}
 
-Recent 20 runs (date, distance km, pace sec/km):
-${paceData.map(r => `${r.date}: ${r.dist}km @ ${Math.floor(r.pace/60)}:${String(r.pace%60).padStart(2,'0')}/km`).join('\n')}
+Recent 20 runs (date, distance miles, pace sec/mile):
+${paceData.map(r => `${r.date}: ${r.dist}mi @ ${Math.floor(r.pace/60)}:${String(r.pace%60).padStart(2,'0')}/mi`).join('\n')}
 
 Provide coaching insights on: training volume trends, pace consistency, progression, and one specific actionable tip. Be direct and data-driven. No generic advice.`;
 
@@ -1121,6 +1147,99 @@ Provide coaching insights on: training volume trends, pace consistency, progress
     textEl.textContent = 'AI insight unavailable — Claude API could not be reached. Your dashboard data is still fully functional above.';
     btn.style.display = 'inline-block';
   }
+}
+
+// ─── Most Recent Run Map ──────────────────────────────────────────────────────
+let leafletMap = null;
+
+function decodePolyline(encoded) {
+  // Google Polyline Algorithm decoder
+  const coords = [];
+  let index = 0, lat = 0, lng = 0;
+  while (index < encoded.length) {
+    let b, shift = 0, result = 0;
+    do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lat += (result & 1) ? ~(result >> 1) : (result >> 1);
+    shift = 0; result = 0;
+    do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lng += (result & 1) ? ~(result >> 1) : (result >> 1);
+    coords.push([lat / 1e5, lng / 1e5]);
+  }
+  return coords;
+}
+
+function renderRunMap(run) {
+  if (!run) return;
+
+  const polyline = run.map?.summary_polyline;
+  const meta = document.getElementById('map-meta');
+  const distMi = (run.distance / 1609.344).toFixed(2);
+  const elev = (run.total_elevation_gain * 3.28084).toFixed(0);
+  const paceS = run.distance > 0 ? run.moving_time / (run.distance / 1609.344) : 0;
+  const paceStr = paceS > 0 ? `${Math.floor(paceS/60)}:${String(Math.round(paceS%60)).padStart(2,'0')}/mi` : '—';
+  const dateStr = new Date(run.start_date).toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' });
+
+  meta.innerHTML = `
+    <div class="map-stat">
+      <div class="map-stat-label">ACTIVITY</div>
+      <div style="font-size:15px;font-weight:500;margin-top:2px">${run.name}</div>
+      <div class="map-stat-unit">${dateStr}</div>
+    </div>
+    <div class="map-stat">
+      <div class="map-stat-label">DISTANCE</div>
+      <div class="map-stat-val">${distMi}<span class="map-stat-unit"> mi</span></div>
+    </div>
+    <div class="map-stat">
+      <div class="map-stat-label">PACE</div>
+      <div class="map-stat-val" style="font-size:22px">${paceStr}</div>
+    </div>
+    <div class="map-stat">
+      <div class="map-stat-label">ELEVATION GAIN</div>
+      <div class="map-stat-val">${elev}<span class="map-stat-unit"> ft</span></div>
+    </div>
+  `;
+
+  if (!polyline) {
+    document.getElementById('map').innerHTML =
+      '<div style="display:flex;align-items:center;justify-content:center;height:100%;font-family:\'DM Mono\',monospace;font-size:12px;color:var(--muted);">No route data available for this activity</div>';
+    return;
+  }
+
+  const coords = decodePolyline(polyline);
+  if (!coords.length) return;
+
+  // Init or reset map
+  if (leafletMap) { leafletMap.remove(); leafletMap = null; }
+
+  leafletMap = L.map('map', { zoomControl: true, scrollWheelZoom: false });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap',
+    maxZoom: 18
+  }).addTo(leafletMap);
+
+  const route = L.polyline(coords, {
+    color: '#FC4C02',
+    weight: 4,
+    opacity: 0.9,
+    lineJoin: 'round'
+  }).addTo(leafletMap);
+
+  // Start/end markers
+  const startIcon = L.divIcon({
+    className: '',
+    html: '<div style="width:12px;height:12px;background:#00e5a0;border:2px solid #fff;border-radius:50%;box-shadow:0 0 8px rgba(0,229,160,0.6)"></div>',
+    iconSize: [12, 12], iconAnchor: [6, 6]
+  });
+  const endIcon = L.divIcon({
+    className: '',
+    html: '<div style="width:12px;height:12px;background:#FC4C02;border:2px solid #fff;border-radius:50%;box-shadow:0 0 8px rgba(252,76,2,0.6)"></div>',
+    iconSize: [12, 12], iconAnchor: [6, 6]
+  });
+
+  L.marker(coords[0], { icon: startIcon }).addTo(leafletMap);
+  L.marker(coords[coords.length - 1], { icon: endIcon }).addTo(leafletMap);
+
+  leafletMap.fitBounds(route.getBounds(), { padding: [24, 24] });
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
