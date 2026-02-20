@@ -661,13 +661,17 @@
   /* Heatmap tab */
   #heatmap-tab {
     display: none;
+    width: 100%;
     height: calc(100vh - 130px);
     position: relative;
+    overflow: hidden;
   }
 
   #heatmap {
-    width: 100%;
-    height: 100%;
+    position: absolute;
+    inset: 0;
+    width: 100% !important;
+    height: 100% !important;
   }
 
   /* Dark tiles for heatmap — no invert, keep dark base map */
@@ -1340,17 +1344,21 @@ function switchTab(tab) {
   if (tab === 'dashboard') {
     document.getElementById('dashboard').style.display = 'block';
     document.getElementById('heatmap-tab').style.display = 'none';
-    // Invalidate leaflet size on return
     if (leafletMap) setTimeout(() => leafletMap.invalidateSize(), 100);
   } else {
     document.getElementById('dashboard').style.display = 'none';
     document.getElementById('heatmap-tab').style.display = 'block';
-    if (!heatmapInitialized) {
-      heatmapInitialized = true;
-      setTimeout(renderHeatmap, 100);
-    } else if (heatLeafletMap) {
-      setTimeout(() => heatLeafletMap.invalidateSize(), 100);
-    }
+    // Must wait for browser to paint the container at full size before Leaflet init
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (!heatmapInitialized) {
+          heatmapInitialized = true;
+          renderHeatmap();
+        } else if (heatLeafletMap) {
+          heatLeafletMap.invalidateSize(true);
+        }
+      });
+    });
   }
 }
 
@@ -1413,12 +1421,18 @@ async function renderHeatmap() {
   // Init map
   if (heatLeafletMap) { heatLeafletMap.remove(); heatLeafletMap = null; }
 
-  heatLeafletMap = L.map('heatmap', { zoomControl: true, scrollWheelZoom: true });
+  // Force container to be visible and sized before init
+  const heatmapEl = document.getElementById('heatmap');
+  heatmapEl.style.width = '100%';
+  heatmapEl.style.height = '100%';
 
-  // Dark base tiles (CartoDB dark)
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-    attribution: '© OpenStreetMap © CARTO',
-    maxZoom: 19
+  heatLeafletMap = L.map('heatmap', { zoomControl: true, scrollWheelZoom: true, preferCanvas: true });
+
+  // Use standard OSM tiles — most reliable
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors',
+    maxZoom: 19,
+    crossOrigin: true
   }).addTo(heatLeafletMap);
 
   // Add heatmap layer using Leaflet.heat
@@ -1438,22 +1452,20 @@ async function renderHeatmap() {
     }
   }).addTo(heatLeafletMap);
 
-  // Fit map to all points
-  if (heatPoints.length > 0) {
-    const lats = heatPoints.map(p => p[0]);
-    const lngs = heatPoints.map(p => p[1]);
-    const bounds = [[Math.min(...lats), Math.min(...lngs)], [Math.max(...lats), Math.max(...lngs)]];
-    heatLeafletMap.fitBounds(bounds, { padding: [40, 40] });
-  }
-
   updateProgress(100, 'Done!');
 
-  // Hide loading, show overlay
+  // Hide loading, show overlay — give map time to fully paint
   setTimeout(() => {
     document.getElementById('heatmap-loading').style.display = 'none';
     document.getElementById('heatmap-overlay').style.display = 'block';
 
-    // Stats
+    heatLeafletMap.invalidateSize(true);
+
+    const lats = heatPoints.map(p => p[0]);
+    const lngs = heatPoints.map(p => p[1]);
+    const bounds = [[Math.min(...lats), Math.min(...lngs)], [Math.max(...lats), Math.max(...lngs)]];
+    heatLeafletMap.fitBounds(bounds, { padding: [60, 60] });
+
     const totalMi = (runs.reduce((s,r) => s + r.distance, 0) / 1609.344).toFixed(0);
     const uniquePoints = Object.keys(pointMap).length;
     document.getElementById('heat-stats').innerHTML = `
@@ -1470,9 +1482,10 @@ async function renderHeatmap() {
         <span class="heatmap-stat-val">${uniquePoints.toLocaleString()}</span>
       </div>
     `;
-    heatLeafletMap.invalidateSize();
-  }, 300);
-}
+
+    // Second invalidate after stats render
+    setTimeout(() => heatLeafletMap.invalidateSize(true), 200);
+  }, 600);
 
 // ─── Most Recent Run Map ──────────────────────────────────────────────────────
 let leafletMap = null;
