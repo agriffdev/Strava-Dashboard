@@ -816,8 +816,8 @@
   </div>
   <div id="heatmap"></div>
   <div class="heatmap-overlay" id="heatmap-overlay" style="display:none">
-    <h2>ROUTE HEATMAP</h2>
-    <p id="heat-subtitle">Last 100 runs · All time</p>
+    <h2>ROUTE OVERLAY</h2>
+    <p id="heat-subtitle">Last 100 runs overlaid</p>
     <div id="heat-stats"></div>
     <div class="heat-legend">
       <span class="heat-legend-label">RARE</span>
@@ -1369,58 +1369,67 @@ async function renderHeatmap() {
   const runs = allActivities.slice(0, 100);
   const totalRuns = runs.length;
   let processed = 0;
-  const pointMap = {};
 
   const updateProgress = (pct, msg) => {
     document.getElementById('heat-progress-fill').style.width = pct + '%';
     document.getElementById('heat-status').textContent = msg;
   };
 
-  updateProgress(5, 'Decoding route polylines...');
-
-  for (const run of runs) {
-    const poly = run.map?.summary_polyline;
-    if (!poly) { processed++; continue; }
-    const coords = decodePolyline(poly);
-    const step = Math.max(1, Math.floor(coords.length / 80));
-    for (let i = 0; i < coords.length; i += step) {
-      const key = `${coords[i][0].toFixed(3)},${coords[i][1].toFixed(3)}`;
-      pointMap[key] = (pointMap[key] || 0) + 1;
-    }
-    processed++;
-    if (processed % 10 === 0) updateProgress(5 + Math.round((processed / totalRuns) * 80), `Processed ${processed}/${totalRuns} routes...`);
-  }
-
-  updateProgress(90, 'Building heatmap...');
-
-  const maxFreq = Math.max(...Object.values(pointMap));
-  const points = Object.entries(pointMap).map(([key, freq]) => {
-    const [lat, lng] = key.split(',').map(Number);
-    return { lat, lng, w: freq / maxFreq };
-  });
+  updateProgress(5, 'Initialising map...');
 
   // Init Leaflet map — default Austin view
   if (heatLeafletMap) { heatLeafletMap.remove(); heatLeafletMap = null; }
-  heatLeafletMap = L.map('heatmap', { zoomControl: true, scrollWheelZoom: true, renderer: L.canvas() });
+  heatLeafletMap = L.map('heatmap', { zoomControl: true, scrollWheelZoom: true });
   heatLeafletMap.setView([30.2672, -97.7431], 12);
 
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '© OpenStreetMap contributors', maxZoom: 19
   }).addTo(heatLeafletMap);
 
-  // Draw all points as canvas circles — colour by frequency
-  points.forEach(({ lat, lng, w }) => {
-    const color = w > 0.75 ? '#ff2200'
-                : w > 0.5  ? '#ff8800'
-                : w > 0.25 ? '#ffee00'
-                : w > 0.1  ? '#00ccff'
-                :             '#1a44ff';
-    const opacity = 0.35 + w * 0.55;
-    L.circleMarker([lat, lng], {
-      radius: 5,
-      fillColor: color,
-      fillOpacity: opacity,
-      stroke: false
+  // Count how many times each route segment is used for colour intensity
+  const freqMap = {};
+  const allCoords = [];
+
+  for (const run of runs) {
+    const poly = run.map?.summary_polyline;
+    if (!poly) { processed++; continue; }
+    const coords = decodePolyline(poly);
+    allCoords.push(coords);
+    // Count point frequency at coarse grid for colour weighting
+    coords.forEach(([lat, lng]) => {
+      const key = `${lat.toFixed(3)},${lng.toFixed(3)}`;
+      freqMap[key] = (freqMap[key] || 0) + 1;
+    });
+    processed++;
+    updateProgress(5 + Math.round((processed / totalRuns) * 70), `Decoded ${processed}/${totalRuns} routes...`);
+  }
+
+  updateProgress(80, 'Drawing routes...');
+
+  const maxFreq = Math.max(...Object.values(freqMap), 1);
+
+  // Draw each run as a polyline, colour by average frequency
+  allCoords.forEach((coords) => {
+    if (!coords.length) return;
+    // Sample midpoint to determine colour
+    const mid = coords[Math.floor(coords.length / 2)];
+    const key = `${mid[0].toFixed(3)},${mid[1].toFixed(3)}`;
+    const freq = freqMap[key] || 1;
+    const w = freq / maxFreq;
+
+    const color = w > 0.6 ? '#ff2200'
+                : w > 0.3 ? '#ff8800'
+                : w > 0.1 ? '#ffcc00'
+                :            '#FC4C02';
+
+    const opacity = 0.25 + w * 0.5;
+
+    L.polyline(coords, {
+      color,
+      weight: 2.5,
+      opacity,
+      lineJoin: 'round',
+      lineCap: 'round'
     }).addTo(heatLeafletMap);
   });
 
@@ -1431,9 +1440,11 @@ async function renderHeatmap() {
     document.getElementById('heatmap-overlay').style.display = 'block';
     heatLeafletMap.invalidateSize(true);
 
-    if (points.length > 0) {
-      const lats = points.map(p => p.lat);
-      const lngs = points.map(p => p.lng);
+    // Fit to all routes
+    const allLatLngs = allCoords.flat();
+    if (allLatLngs.length > 0) {
+      const lats = allLatLngs.map(p => p[0]);
+      const lngs = allLatLngs.map(p => p[1]);
       heatLeafletMap.fitBounds(
         [[Math.min(...lats), Math.min(...lngs)], [Math.max(...lats), Math.max(...lngs)]],
         { padding: [60, 60] }
@@ -1444,18 +1455,18 @@ async function renderHeatmap() {
     document.getElementById('heat-stats').innerHTML = `
       <div class="heatmap-stat">
         <span class="heatmap-stat-label">RUNS MAPPED</span>
-        <span class="heatmap-stat-val">${totalRuns}</span>
+        <span class="heatmap-stat-val">${processed}</span>
       </div>
       <div class="heatmap-stat">
         <span class="heatmap-stat-label">TOTAL MILES</span>
         <span class="heatmap-stat-val">${totalMi}</span>
       </div>
       <div class="heatmap-stat">
-        <span class="heatmap-stat-label">UNIQUE POINTS</span>
-        <span class="heatmap-stat-val">${points.length.toLocaleString()}</span>
+        <span class="heatmap-stat-label">ROUTES DRAWN</span>
+        <span class="heatmap-stat-val">${allCoords.length}</span>
       </div>
     `;
-  }, 500);
+  }, 400);
 }
 
 // ─── Most Recent Run Map ──────────────────────────────────────────────────────
