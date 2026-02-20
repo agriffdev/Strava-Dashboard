@@ -967,9 +967,36 @@
       <div style="font-family:'DM Mono',monospace;font-size:12px;color:var(--muted);">Loading best efforts...</div>
     </div>
   </div>
+
+  <!-- Temperature vs Pace -->
+  <div class="panel" style="margin-bottom:40px" id="temp-panel">
+    <div class="panel-title">Temperature vs Pace Analysis</div>
+    <div id="temp-loading" style="display:flex;align-items:center;gap:12px;padding:24px 0;font-family:'DM Mono',monospace;font-size:12px;color:var(--muted);">
+      <div class="spinner"></div>
+      <span id="temp-status">Fetching weather data for your runs...</span>
+    </div>
+    <div id="temp-content" style="display:none">
+      <!-- Summary stats row -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px" id="temp-stats-row"></div>
+      <!-- Charts side by side -->
+      <div class="two-col" style="margin-bottom:0">
+        <div>
+          <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:2px;margin-bottom:12px">SCATTER — EACH RUN</div>
+          <canvas id="scatter-chart" height="260"></canvas>
+        </div>
+        <div>
+          <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:2px;margin-bottom:12px">TREND — AVG PACE BY TEMP RANGE</div>
+          <canvas id="trend-chart" height="260"></canvas>
+        </div>
+      </div>
+      <div id="temp-insight" style="margin-top:20px;padding:16px;background:var(--surface2);border-radius:8px;font-size:13px;line-height:1.7;color:var(--muted);font-family:'DM Mono',monospace;font-size:11px;letter-spacing:0.5px;"></div>
+    </div>
+    <div id="temp-error" style="display:none;font-family:'DM Mono',monospace;font-size:12px;color:#ff6b6b;padding:16px 0;"></div>
+  </div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script>
 let accessToken = null;
 let allActivities = [];
@@ -1085,8 +1112,9 @@ async function loadDashboard() {
     document.getElementById('tab-nav').style.display = 'flex';
     renderDashboard();
 
-    // Trigger AI insight
+    // Trigger AI insight and temp analysis
     setTimeout(getInsight, 800);
+    setTimeout(loadTempAnalysis, 1200);
   } catch (e) {
     hideLoading();
     document.getElementById('auth-section').style.display = 'flex';
@@ -1380,7 +1408,7 @@ async function renderHeatmap() {
   // Init Leaflet map — default Austin view
   if (heatLeafletMap) { heatLeafletMap.remove(); heatLeafletMap = null; }
   heatLeafletMap = L.map('heatmap', { zoomControl: true, scrollWheelZoom: true });
-  heatLeafletMap.setView([30.2672, -97.7431], 12);
+  heatLeafletMap.setView([30.2607, -97.7382], 14);
 
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '© OpenStreetMap contributors', maxZoom: 19
@@ -1560,6 +1588,233 @@ function renderRunMap(run) {
   L.marker(coords[coords.length - 1], { icon: endIcon }).addTo(leafletMap);
 
   leafletMap.fitBounds(route.getBounds(), { padding: [24, 24] });
+}
+
+// ─── Temperature vs Pace Analysis ─────────────────────────────────────────────
+async function loadTempAnalysis() {
+  const runs = allActivities.slice(0, 100).filter(r => r.distance > 1000);
+  const statusEl = document.getElementById('temp-status');
+  const setStatus = msg => { statusEl.textContent = msg; };
+
+  try {
+    setStatus('Fetching historical weather from Open-Meteo...');
+
+    // Batch runs by date to minimise API calls
+    // Open-Meteo historical API: one call per run location/date
+    const runData = [];
+    let fetched = 0;
+
+    for (const run of runs) {
+      const lat = run.start_latlng?.[0];
+      const lng = run.start_latlng?.[1];
+      if (!lat || !lng) { fetched++; continue; }
+
+      const date = run.start_date.slice(0, 10);
+      const hour = new Date(run.start_date).getUTCHours();
+
+      try {
+        const url = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat.toFixed(3)}&longitude=${lng.toFixed(3)}&start_date=${date}&end_date=${date}&hourly=temperature_2m&temperature_unit=fahrenheit&timezone=America%2FChicago`;
+        const resp = await fetch(url);
+        const data = await resp.json();
+        const temps = data?.hourly?.temperature_2m;
+        if (!temps) { fetched++; continue; }
+
+        // Get temp at the hour the run started
+        const temp = temps[Math.min(hour, temps.length - 1)];
+        const paceSecPerMile = run.moving_time / (run.distance / 1609.344);
+
+        // Filter out obviously bad data (sub 4min or over 20min miles)
+        if (paceSecPerMile > 240 && paceSecPerMile < 1200 && temp > -20 && temp < 130) {
+          runData.push({
+            name: run.name,
+            date: run.start_date.slice(0, 10),
+            temp: Math.round(temp),
+            pace: paceSecPerMile,
+            dist: (run.distance / 1609.344).toFixed(1)
+          });
+        }
+      } catch(e) { /* skip failed runs */ }
+
+      fetched++;
+      if (fetched % 5 === 0) setStatus(`Fetched weather for ${fetched}/${runs.length} runs...`);
+
+      // Small delay to be respectful to the free API
+      await new Promise(r => setTimeout(r, 80));
+    }
+
+    if (runData.length < 5) throw new Error('Not enough runs with weather data to analyse.');
+
+    document.getElementById('temp-loading').style.display = 'none';
+    document.getElementById('temp-content').style.display = 'block';
+
+    renderTempCharts(runData);
+
+  } catch(e) {
+    document.getElementById('temp-loading').style.display = 'none';
+    document.getElementById('temp-error').style.display = 'block';
+    document.getElementById('temp-error').textContent = 'Could not load weather data: ' + e.message;
+  }
+}
+
+function paceToStr(secs) {
+  const m = Math.floor(secs / 60);
+  const s = Math.round(secs % 60);
+  return `${m}:${String(s).padStart(2,'0')}`;
+}
+
+function renderTempCharts(runData) {
+  // Sort by temp
+  runData.sort((a, b) => a.temp - b.temp);
+
+  const temps = runData.map(r => r.temp);
+  const paces = runData.map(r => r.pace);
+
+  const minTemp = Math.min(...temps);
+  const maxTemp = Math.max(...temps);
+  const avgPace = paces.reduce((s,p) => s+p, 0) / paces.length;
+
+  // Find optimal temp (best average pace)
+  const buckets = {};
+  runData.forEach(r => {
+    const bucket = Math.floor(r.temp / 10) * 10;
+    if (!buckets[bucket]) buckets[bucket] = [];
+    buckets[bucket].push(r.pace);
+  });
+  const bucketAvgs = Object.entries(buckets).map(([t, ps]) => ({
+    temp: parseInt(t),
+    avgPace: ps.reduce((s,p) => s+p,0) / ps.length,
+    count: ps.length
+  })).filter(b => b.count >= 2).sort((a,b) => a.temp - b.temp);
+
+  const bestBucket = [...bucketAvgs].sort((a,b) => a.avgPace - b.avgPace)[0];
+
+  // Correlation coefficient
+  const n = temps.length;
+  const meanT = temps.reduce((s,t)=>s+t,0)/n;
+  const meanP = paces.reduce((s,p)=>s+p,0)/n;
+  const num = temps.reduce((s,t,i) => s + (t-meanT)*(paces[i]-meanP), 0);
+  const den = Math.sqrt(temps.reduce((s,t)=>s+(t-meanT)**2,0) * paces.reduce((s,p)=>s+(p-meanP)**2,0));
+  const corr = den > 0 ? (num/den) : 0;
+
+  // Summary stats
+  document.getElementById('temp-stats-row').innerHTML = `
+    <div class="stat-card" style="padding:16px">
+      <div class="stat-label">RUNS ANALYSED</div>
+      <div class="stat-value" style="font-size:32px">${runData.length}</div>
+    </div>
+    <div class="stat-card" style="padding:16px">
+      <div class="stat-label">TEMP RANGE</div>
+      <div class="stat-value" style="font-size:32px">${minTemp}–${maxTemp}°</div>
+      <div class="stat-unit">°F across all runs</div>
+    </div>
+    <div class="stat-card" style="padding:16px">
+      <div class="stat-label">OPTIMAL TEMP</div>
+      <div class="stat-value" style="font-size:32px">${bestBucket ? bestBucket.temp + '°' : '—'}</div>
+      <div class="stat-unit">°F for best pace</div>
+    </div>
+    <div class="stat-card" style="padding:16px">
+      <div class="stat-label">CORRELATION</div>
+      <div class="stat-value" style="font-size:32px">${corr > 0 ? '+' : ''}${corr.toFixed(2)}</div>
+      <div class="stat-unit">${Math.abs(corr) > 0.4 ? (corr > 0 ? 'heat slows you down' : 'cold slows you down') : 'weak temp effect'}</div>
+    </div>
+  `;
+
+  const chartDefaults = {
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { grid: { color: '#2a2a2a' }, ticks: { color: '#666', font: { family: 'DM Mono', size: 10 } } },
+      y: { grid: { color: '#2a2a2a' }, ticks: { color: '#666', font: { family: 'DM Mono', size: 10 },
+        callback: val => paceToStr(val) } }
+    }
+  };
+
+  // ── Scatter chart ──
+  new Chart(document.getElementById('scatter-chart'), {
+    type: 'scatter',
+    data: {
+      datasets: [{
+        data: runData.map(r => ({ x: r.temp, y: r.pace, name: r.name, date: r.date, dist: r.dist })),
+        backgroundColor: runData.map(r => {
+          const t = (r.temp - minTemp) / (maxTemp - minTemp || 1);
+          const r2 = Math.round(26 + t * 229);
+          const g2 = Math.round(180 - t * 180);
+          return `rgba(${r2},${g2},80,0.75)`;
+        }),
+        pointRadius: 6,
+        pointHoverRadius: 9
+      }]
+    },
+    options: {
+      ...chartDefaults,
+      plugins: {
+        ...chartDefaults.plugins,
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const d = ctx.raw;
+              return [`${d.name}`, `${d.date} · ${d.dist}mi`, `${ctx.raw.x}°F · ${paceToStr(ctx.raw.y)}/mi`];
+            }
+          },
+          bodyFont: { family: 'DM Mono', size: 11 },
+          backgroundColor: '#1a1a1a',
+          borderColor: '#2a2a2a',
+          borderWidth: 1
+        }
+      },
+      scales: {
+        ...chartDefaults.scales,
+        x: { ...chartDefaults.scales.x, title: { display: true, text: 'Temperature (°F)', color: '#666', font: { family: 'DM Mono', size: 10 } } },
+        y: { ...chartDefaults.scales.y, title: { display: true, text: 'Pace (min/mi)', color: '#666', font: { family: 'DM Mono', size: 10 } },
+          reverse: true }
+      }
+    }
+  });
+
+  // ── Trend / bar chart ──
+  new Chart(document.getElementById('trend-chart'), {
+    type: 'bar',
+    data: {
+      labels: bucketAvgs.map(b => `${b.temp}s°F`),
+      datasets: [{
+        data: bucketAvgs.map(b => b.avgPace),
+        backgroundColor: bucketAvgs.map(b => {
+          const t = (b.temp - minTemp) / (maxTemp - minTemp || 1);
+          return `rgba(252,76,2,${0.4 + t * 0.5})`;
+        }),
+        borderRadius: 4
+      }]
+    },
+    options: {
+      ...chartDefaults,
+      scales: {
+        ...chartDefaults.scales,
+        x: { ...chartDefaults.scales.x, title: { display: true, text: 'Temp Range (°F)', color: '#666', font: { family: 'DM Mono', size: 10 } } },
+        y: { ...chartDefaults.scales.y, title: { display: true, text: 'Avg Pace (min/mi)', color: '#666', font: { family: 'DM Mono', size: 10 } },
+          reverse: true }
+      },
+      plugins: {
+        ...chartDefaults.plugins,
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const b = bucketAvgs[ctx.dataIndex];
+              return [`Avg pace: ${paceToStr(ctx.raw)}`, `${b.count} runs in range`];
+            }
+          },
+          bodyFont: { family: 'DM Mono', size: 11 },
+          backgroundColor: '#1a1a1a',
+          borderColor: '#2a2a2a',
+          borderWidth: 1
+        }
+      }
+    }
+  });
+
+  // Insight text
+  const direction = corr > 0.3 ? 'slower in heat' : corr < -0.3 ? 'slower in cold' : 'not strongly affected by temperature';
+  const best = bestBucket ? `Your sweet spot is the ${bestBucket.temp}s°F range` : '';
+  document.getElementById('temp-insight').textContent =
+    `Based on ${runData.length} runs between ${minTemp}°F and ${maxTemp}°F, your pace is ${direction} (r=${corr.toFixed(2)}). ${best}${best ? ', where your average pace is ' + paceToStr(bestBucket.avgPace) + '/mi.' : '.'}`;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
