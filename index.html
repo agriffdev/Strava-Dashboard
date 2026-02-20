@@ -614,6 +614,9 @@
   .full-width { grid-column: 1 / -1; }
   .tag { display: inline-block; background: var(--orange-dim); color: var(--orange); font-family: var(--mono); font-size: 10px; letter-spacing: 1px; padding: 2px 8px; border-radius: 3px; margin-right: 6px; }
 
+  #period-filter:hover, #period-filter:focus { border-color: var(--orange); }
+  #period-filter option { background: var(--surface2); }
+
   /* Map panel */
   #map {
     height: 320px;
@@ -897,6 +900,32 @@
     </div>
   </div>
 
+  <!-- Time Period Filter -->
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+    <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:2px;text-transform:uppercase;">Filter Period</div>
+    <select id="period-filter" onchange="applyFilter()" style="
+      background:var(--surface);
+      border:1px solid var(--border);
+      color:var(--text);
+      font-family:'DM Mono',monospace;
+      font-size:11px;
+      letter-spacing:1px;
+      padding:8px 14px;
+      border-radius:6px;
+      outline:none;
+      cursor:pointer;
+      transition:border-color 0.2s;
+    ">
+      <option value="all">All Time</option>
+      <option value="ytd">Year to Date</option>
+      <option value="year">Last Year</option>
+      <option value="month">Last Month</option>
+      <option value="week">Last Week</option>
+      <option value="thisweek">This Week</option>
+    </select>
+    <div id="filter-count" style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:1px;"></div>
+  </div>
+
   <!-- Key Stats -->
   <div class="stats-grid" id="stats-grid">
     <div class="stat-card">
@@ -1141,6 +1170,45 @@ async function fetchAllActivities() {
   return all;
 }
 
+// ─── Filter ───────────────────────────────────────────────────────────────────
+function getFilteredRuns() {
+  const period = document.getElementById('period-filter')?.value || 'all';
+  const now = new Date();
+  let cutoff = null;
+
+  if (period === 'all') return allActivities;
+
+  if (period === 'thisweek') {
+    // Monday of current week
+    const day = now.getDay(); // 0=Sun
+    const diff = (day === 0 ? -6 : 1 - day);
+    cutoff = new Date(now);
+    cutoff.setDate(now.getDate() + diff);
+    cutoff.setHours(0, 0, 0, 0);
+  } else if (period === 'week') {
+    cutoff = new Date(now - 7 * 24 * 60 * 60 * 1000);
+  } else if (period === 'month') {
+    cutoff = new Date(now - 30 * 24 * 60 * 60 * 1000);
+  } else if (period === 'year') {
+    cutoff = new Date(now - 365 * 24 * 60 * 60 * 1000);
+  } else if (period === 'ytd') {
+    cutoff = new Date(now.getFullYear(), 0, 1); // Jan 1 this year
+  }
+
+  return allActivities.filter(a => new Date(a.start_date) >= cutoff);
+}
+
+function applyFilter() {
+  const filtered = getFilteredRuns();
+  const period = document.getElementById('period-filter').value;
+  const label = period === 'all' ? 'all time' : `${filtered.length} runs in period`;
+  document.getElementById('filter-count').textContent = `${filtered.length} runs`;
+  renderStats(filtered);
+  renderMonthChart(filtered);
+  renderRecentActivities(filtered.slice(0, 10));
+  renderBestEfforts(filtered);
+}
+
 // ─── Render ───────────────────────────────────────────────────────────────────
 function renderDashboard() {
   const runs = allActivities;
@@ -1152,6 +1220,25 @@ function renderDashboard() {
     `${athleteData.city || ''} ${athleteData.country || ''} · ${runs.length} runs loaded`.trim();
   document.getElementById('last-updated').textContent =
     'SYNCED ' + new Date().toLocaleString().toUpperCase();
+  document.getElementById('filter-count').textContent = `${runs.length} runs`;
+
+  renderStats(runs);
+  renderMonthChart(runs);
+  renderRecentActivities(runs.slice(0, 10));
+  renderBestEfforts(runs);
+  renderRunMap(runs[0]);
+}
+
+function renderStats(runs) {
+  if (!runs.length) {
+    document.getElementById('stat-count').textContent = '0';
+    document.getElementById('stat-dist').textContent = '0';
+    document.getElementById('stat-elev').textContent = '0';
+    document.getElementById('stat-time').textContent = '0';
+    document.getElementById('stat-pace').textContent = '—';
+    document.getElementById('stat-longest').textContent = '0';
+    return;
+  }
 
   // Aggregate stats — miles
   const KM_TO_MI = 0.621371;
@@ -1175,18 +1262,6 @@ function renderDashboard() {
   document.getElementById('stat-pace').textContent =
     avgPaceSec > 0 ? `${avgPaceMin}:${String(avgPaceSec2).padStart(2,'0')}` : '—';
   document.getElementById('stat-longest').textContent = longestRun.toFixed(1);
-
-  // Monthly distance bar chart
-  renderMonthChart(runs);
-
-  // Recent activities (last 10)
-  renderRecentActivities(runs.slice(0, 10));
-
-  // Best efforts / PRs
-  renderBestEfforts(runs);
-
-  // Most recent run map
-  renderRunMap(runs[0]);
 }
 
 function renderMonthChart(runs) {
