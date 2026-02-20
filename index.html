@@ -626,6 +626,159 @@
   .map-stat-val { font-family: var(--display); font-size: 28px; color: var(--text); }
   .map-stat-unit { font-family: var(--mono); font-size: 11px; color: var(--muted); }
   .leaflet-tile { filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(1.1); }
+
+  /* Tab navigation */
+  .tab-nav {
+    display: none;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+    padding: 0 40px;
+    background: rgba(10,10,10,0.95);
+    position: sticky;
+    top: 73px;
+    z-index: 99;
+    backdrop-filter: blur(12px);
+  }
+
+  .tab-btn {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 16px 24px;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-bottom: -1px;
+  }
+
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { color: var(--orange); border-bottom-color: var(--orange); }
+
+  /* Heatmap tab */
+  #heatmap-tab {
+    display: none;
+    height: calc(100vh - 130px);
+    position: relative;
+  }
+
+  #heatmap {
+    width: 100%;
+    height: 100%;
+  }
+
+  /* Dark tiles for heatmap — no invert, keep dark base map */
+  #heatmap .leaflet-tile { filter: brightness(0.3) contrast(1.2); }
+
+  .heatmap-overlay {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    z-index: 500;
+    background: rgba(10,10,10,0.88);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 24px;
+    backdrop-filter: blur(12px);
+    min-width: 200px;
+  }
+
+  .heatmap-overlay h2 {
+    font-family: var(--display);
+    font-size: 28px;
+    letter-spacing: 2px;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+
+  .heatmap-overlay p {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 1px;
+    margin-bottom: 16px;
+  }
+
+  .heat-legend {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .heat-gradient {
+    width: 100px;
+    height: 6px;
+    border-radius: 3px;
+    background: linear-gradient(90deg, #0000ff, #00ffff, #00ff00, #ffff00, #ff0000);
+  }
+
+  .heat-legend-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--muted);
+    letter-spacing: 1px;
+  }
+
+  .heatmap-stat {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .heatmap-stat:last-child { border-bottom: none; }
+  .heatmap-stat-label { font-family: var(--mono); font-size: 10px; color: var(--muted); letter-spacing: 1px; }
+  .heatmap-stat-val { font-family: var(--display); font-size: 20px; color: var(--orange); }
+
+  .heat-loading {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 600;
+    text-align: center;
+    background: rgba(10,10,10,0.9);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 32px 48px;
+  }
+
+  .heat-loading h3 {
+    font-family: var(--display);
+    font-size: 32px;
+    letter-spacing: 3px;
+    color: var(--orange);
+    margin-bottom: 12px;
+  }
+
+  .heat-loading p {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 1px;
+  }
+
+  .heat-progress {
+    width: 200px;
+    height: 2px;
+    background: var(--border);
+    border-radius: 2px;
+    margin: 16px auto 0;
+    overflow: hidden;
+  }
+
+  .heat-progress-fill {
+    height: 100%;
+    background: var(--orange);
+    border-radius: 2px;
+    transition: width 0.3s ease;
+    width: 0%;
+  }
 </style>
 </head>
 <body>
@@ -642,6 +795,32 @@
   <div class="logo">PHYSICAL<span>INTEL</span></div>
   <div class="header-tag">STRAVA × CLAUDE AI — SENSOR DASHBOARD v1.0</div>
 </header>
+
+<!-- Tab Navigation (shown after login) -->
+<nav class="tab-nav" id="tab-nav">
+  <button class="tab-btn active" onclick="switchTab('dashboard')">⬡ Dashboard</button>
+  <button class="tab-btn" onclick="switchTab('heatmap')">◈ Route Heatmap</button>
+</nav>
+
+<!-- Heatmap Tab -->
+<div id="heatmap-tab">
+  <div id="heatmap-loading" class="heat-loading">
+    <h3>MAPPING ROUTES</h3>
+    <p id="heat-status">Decoding polylines...</p>
+    <div class="heat-progress"><div class="heat-progress-fill" id="heat-progress-fill"></div></div>
+  </div>
+  <div id="heatmap"></div>
+  <div class="heatmap-overlay" id="heatmap-overlay" style="display:none">
+    <h2>ROUTE HEATMAP</h2>
+    <p id="heat-subtitle">Last 100 runs · All time</p>
+    <div id="heat-stats"></div>
+    <div class="heat-legend">
+      <span class="heat-legend-label">RARE</span>
+      <div class="heat-gradient"></div>
+      <span class="heat-legend-label">FREQUENT</span>
+    </div>
+  </div>
+</div>
 
 <!-- Auth Section -->
 <div id="auth-section">
@@ -786,6 +965,7 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.heat/0.2.0/leaflet-heat.js"></script>
 <script>
 let accessToken = null;
 let allActivities = [];
@@ -898,6 +1078,7 @@ async function loadDashboard() {
     hideLoading();
 
     document.getElementById('dashboard').style.display = 'block';
+    document.getElementById('tab-nav').style.display = 'flex';
     renderDashboard();
 
     // Trigger AI insight
@@ -1147,6 +1328,140 @@ Provide coaching insights on: training volume trends, pace consistency, progress
     textEl.textContent = 'AI insight unavailable — Claude API could not be reached. Your dashboard data is still fully functional above.';
     btn.style.display = 'inline-block';
   }
+}
+
+// ─── Tab Switching ────────────────────────────────────────────────────────────
+let heatmapInitialized = false;
+
+function switchTab(tab) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelector(`.tab-btn[onclick="switchTab('${tab}')"]`).classList.add('active');
+
+  if (tab === 'dashboard') {
+    document.getElementById('dashboard').style.display = 'block';
+    document.getElementById('heatmap-tab').style.display = 'none';
+    // Invalidate leaflet size on return
+    if (leafletMap) setTimeout(() => leafletMap.invalidateSize(), 100);
+  } else {
+    document.getElementById('dashboard').style.display = 'none';
+    document.getElementById('heatmap-tab').style.display = 'block';
+    if (!heatmapInitialized) {
+      heatmapInitialized = true;
+      setTimeout(renderHeatmap, 100);
+    } else if (heatLeafletMap) {
+      setTimeout(() => heatLeafletMap.invalidateSize(), 100);
+    }
+  }
+}
+
+// ─── Heatmap ──────────────────────────────────────────────────────────────────
+let heatLeafletMap = null;
+
+async function renderHeatmap() {
+  const runs = allActivities.slice(0, 100);
+  const totalRuns = runs.length;
+  let processed = 0;
+
+  // Collect all lat/lng points with intensity
+  // Points that appear on many routes get higher weight
+  const pointMap = {};
+
+  const updateProgress = (pct, msg) => {
+    document.getElementById('heat-progress-fill').style.width = pct + '%';
+    document.getElementById('heat-status').textContent = msg;
+  };
+
+  updateProgress(5, 'Decoding route polylines...');
+
+  // Decode all polylines, count point frequency
+  for (const run of runs) {
+    const poly = run.map?.summary_polyline;
+    if (!poly) { processed++; continue; }
+
+    const coords = decodePolyline(poly);
+    // Sample every Nth point to keep performance smooth
+    const step = Math.max(1, Math.floor(coords.length / 40));
+    for (let i = 0; i < coords.length; i += step) {
+      // Round to ~50m grid for frequency counting
+      const key = `${(coords[i][0]).toFixed(3)},${(coords[i][1]).toFixed(3)}`;
+      pointMap[key] = (pointMap[key] || 0) + 1;
+    }
+
+    processed++;
+    const pct = 5 + Math.round((processed / totalRuns) * 80);
+    if (processed % 10 === 0) updateProgress(pct, `Processed ${processed}/${totalRuns} routes...`);
+  }
+
+  updateProgress(90, 'Building heatmap...');
+
+  // Convert to leaflet.heat format [lat, lng, intensity]
+  const maxFreq = Math.max(...Object.values(pointMap));
+  const heatPoints = Object.entries(pointMap).map(([key, freq]) => {
+    const [lat, lng] = key.split(',').map(Number);
+    return [lat, lng, freq / maxFreq];
+  });
+
+  // Init map
+  if (heatLeafletMap) { heatLeafletMap.remove(); heatLeafletMap = null; }
+
+  heatLeafletMap = L.map('heatmap', { zoomControl: true, scrollWheelZoom: true });
+
+  // Dark base tiles (CartoDB dark)
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '© OpenStreetMap © CARTO',
+    maxZoom: 19
+  }).addTo(heatLeafletMap);
+
+  // Add heatmap layer using Leaflet.heat
+  const heat = L.heatLayer(heatPoints, {
+    radius: 14,
+    blur: 18,
+    maxZoom: 17,
+    max: 1.0,
+    gradient: {
+      0.0: '#0000ff',
+      0.2: '#00ffff',
+      0.4: '#00ff00',
+      0.6: '#ffff00',
+      0.8: '#ff8800',
+      1.0: '#ff0000'
+    }
+  }).addTo(heatLeafletMap);
+
+  // Fit map to all points
+  if (heatPoints.length > 0) {
+    const lats = heatPoints.map(p => p[0]);
+    const lngs = heatPoints.map(p => p[1]);
+    const bounds = [[Math.min(...lats), Math.min(...lngs)], [Math.max(...lats), Math.max(...lngs)]];
+    heatLeafletMap.fitBounds(bounds, { padding: [40, 40] });
+  }
+
+  updateProgress(100, 'Done!');
+
+  // Hide loading, show overlay
+  setTimeout(() => {
+    document.getElementById('heatmap-loading').style.display = 'none';
+    document.getElementById('heatmap-overlay').style.display = 'block';
+
+    // Stats
+    const totalMi = (runs.reduce((s,r) => s + r.distance, 0) / 1609.344).toFixed(0);
+    const uniquePoints = Object.keys(pointMap).length;
+    document.getElementById('heat-stats').innerHTML = `
+      <div class="heatmap-stat">
+        <span class="heatmap-stat-label">RUNS MAPPED</span>
+        <span class="heatmap-stat-val">${totalRuns}</span>
+      </div>
+      <div class="heatmap-stat">
+        <span class="heatmap-stat-label">TOTAL MILES</span>
+        <span class="heatmap-stat-val">${totalMi}</span>
+      </div>
+      <div class="heatmap-stat">
+        <span class="heatmap-stat-label">UNIQUE POINTS</span>
+        <span class="heatmap-stat-val">${uniquePoints.toLocaleString()}</span>
+      </div>
+    `;
+    heatLeafletMap.invalidateSize();
+  }, 300);
 }
 
 // ─── Most Recent Run Map ──────────────────────────────────────────────────────
