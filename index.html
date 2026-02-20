@@ -970,7 +970,6 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
 <script>
 let accessToken = null;
 let allActivities = [];
@@ -1365,23 +1364,13 @@ function switchTab(tab) {
 
 // ─── Heatmap ──────────────────────────────────────────────────────────────────
 let heatLeafletMap = null;
+let heatCanvasLayer = null;
+let allHeatPoints = [];
 
 async function renderHeatmap() {
-  // Check Leaflet.heat loaded
-  if (typeof L.heatLayer === 'undefined') {
-    document.getElementById('heatmap-loading').innerHTML = `
-      <h3 style="color:#ff6b6b">PLUGIN ERROR</h3>
-      <p style="color:var(--muted)">Leaflet.heat failed to load.<br>Check your internet connection and try refreshing.</p>
-    `;
-    return;
-  }
-
   const runs = allActivities.slice(0, 100);
   const totalRuns = runs.length;
   let processed = 0;
-
-  // Collect all lat/lng points with intensity
-  // Points that appear on many routes get higher weight
   const pointMap = {};
 
   const updateProgress = (pct, msg) => {
@@ -1391,84 +1380,119 @@ async function renderHeatmap() {
 
   updateProgress(5, 'Decoding route polylines...');
 
-  // Decode all polylines, count point frequency
   for (const run of runs) {
     const poly = run.map?.summary_polyline;
     if (!poly) { processed++; continue; }
-
     const coords = decodePolyline(poly);
-    // Sample every 2nd point — keeps density high while staying performant
-    const step = Math.max(1, Math.floor(coords.length / 200));
+    const step = Math.max(1, Math.floor(coords.length / 150));
     for (let i = 0; i < coords.length; i += step) {
-      // Round to ~25m grid for frequency counting
-      const key = `${(coords[i][0]).toFixed(4)},${(coords[i][1]).toFixed(4)}`;
+      const key = `${coords[i][0].toFixed(4)},${coords[i][1].toFixed(4)}`;
       pointMap[key] = (pointMap[key] || 0) + 1;
     }
-
     processed++;
-    const pct = 5 + Math.round((processed / totalRuns) * 80);
-    if (processed % 10 === 0) updateProgress(pct, `Processed ${processed}/${totalRuns} routes...`);
+    if (processed % 10 === 0) updateProgress(5 + Math.round((processed / totalRuns) * 80), `Processed ${processed}/${totalRuns} routes...`);
   }
 
   updateProgress(90, 'Building heatmap...');
 
-  // Convert to leaflet.heat format [lat, lng, intensity]
   const maxFreq = Math.max(...Object.values(pointMap));
-  const heatPoints = Object.entries(pointMap).map(([key, freq]) => {
+  allHeatPoints = Object.entries(pointMap).map(([key, freq]) => {
     const [lat, lng] = key.split(',').map(Number);
-    return [lat, lng, freq / maxFreq];
+    return { lat, lng, weight: freq / maxFreq };
   });
 
-  // Init map
+  // Init Leaflet map
   if (heatLeafletMap) { heatLeafletMap.remove(); heatLeafletMap = null; }
 
-  // Force container to be visible and sized before init
-  const heatmapEl = document.getElementById('heatmap');
-  heatmapEl.style.width = '100%';
-  heatmapEl.style.height = '100%';
+  heatLeafletMap = L.map('heatmap', { zoomControl: true, scrollWheelZoom: true });
 
-  heatLeafletMap = L.map('heatmap', { zoomControl: true, scrollWheelZoom: true, preferCanvas: true });
+  // Default view: Austin, TX
+  heatLeafletMap.setView([30.2672, -97.7431], 12);
 
-  // Use standard OSM tiles — most reliable
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '© OpenStreetMap contributors',
-    maxZoom: 19,
-    crossOrigin: true
+    maxZoom: 19
   }).addTo(heatLeafletMap);
 
-  // Add heatmap layer using Leaflet.heat
-  const heat = L.heatLayer(heatPoints, {
-    radius: 25,
-    blur: 20,
-    maxZoom: 17,
-    max: 0.3,
-    minOpacity: 0.7,
-    gradient: {
-      0.0: '#1a00ff',
-      0.25: '#00ccff',
-      0.5: '#00ff88',
-      0.7: '#ffee00',
-      0.85: '#ff8800',
-      1.0: '#ff0000'
+  // Custom Canvas overlay
+  const CanvasHeat = L.Layer.extend({
+    onAdd(map) {
+      this._map = map;
+      const size = map.getSize();
+      this._canvas = L.DomUtil.create('canvas', 'leaflet-canvas-heat');
+      this._canvas.style.position = 'absolute';
+      this._canvas.style.top = '0';
+      this._canvas.style.left = '0';
+      this._canvas.style.pointerEvents = 'none';
+      this._canvas.style.zIndex = '400';
+      this._canvas.width = size.x;
+      this._canvas.height = size.y;
+      map.getPanes().overlayPane.appendChild(this._canvas);
+      map.on('moveend zoomend resize', this._redraw, this);
+      this._redraw();
+    },
+    onRemove(map) {
+      map.getPanes().overlayPane.removeChild(this._canvas);
+      map.off('moveend zoomend resize', this._redraw, this);
+    },
+    _redraw() {
+      const map = this._map;
+      const size = map.getSize();
+      const canvas = this._canvas;
+      canvas.width = size.x;
+      canvas.height = size.y;
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const topLeft = map.containerPointToLayerPoint([0, 0]);
+      L.DomUtil.setPosition(canvas, topLeft);
+
+      const zoom = map.getZoom();
+      const radius = Math.max(4, Math.round(zoom * 1.8));
+      const blur = radius * 0.8;
+
+      // Draw each point as a radial gradient blob
+      allHeatPoints.forEach(({ lat, lng, weight }) => {
+        const pt = map.latLngToContainerPoint([lat, lng]);
+        const x = pt.x - topLeft.x;
+        const y = pt.y - topLeft.y;
+        if (x < -radius || x > canvas.width + radius || y < -radius || y > canvas.height + radius) return;
+
+        const r = radius + blur;
+        const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
+        const alpha = Math.min(1, 0.4 + weight * 0.6);
+        const color = weightToColor(weight);
+        grad.addColorStop(0, color.replace('A)', `${alpha})`));
+        grad.addColorStop(1, color.replace('A)', '0)'));
+        ctx.beginPath();
+        ctx.fillStyle = grad;
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+      });
     }
-  }).addTo(heatLeafletMap);
+  });
+
+  heatCanvasLayer = new CanvasHeat();
+  heatCanvasLayer.addTo(heatLeafletMap);
 
   updateProgress(100, 'Done!');
 
-  // Hide loading, show overlay — give map time to fully paint
   setTimeout(() => {
     document.getElementById('heatmap-loading').style.display = 'none';
     document.getElementById('heatmap-overlay').style.display = 'block';
-
     heatLeafletMap.invalidateSize(true);
 
-    const lats = heatPoints.map(p => p[0]);
-    const lngs = heatPoints.map(p => p[1]);
-    const bounds = [[Math.min(...lats), Math.min(...lngs)], [Math.max(...lats), Math.max(...lngs)]];
-    heatLeafletMap.fitBounds(bounds, { padding: [60, 60] });
+    // Fit to actual run bounds
+    if (allHeatPoints.length > 0) {
+      const lats = allHeatPoints.map(p => p.lat);
+      const lngs = allHeatPoints.map(p => p.lng);
+      heatLeafletMap.fitBounds(
+        [[Math.min(...lats), Math.min(...lngs)], [Math.max(...lats), Math.max(...lngs)]],
+        { padding: [60, 60] }
+      );
+    }
 
     const totalMi = (runs.reduce((s,r) => s + r.distance, 0) / 1609.344).toFixed(0);
-    const uniquePoints = Object.keys(pointMap).length;
     document.getElementById('heat-stats').innerHTML = `
       <div class="heatmap-stat">
         <span class="heatmap-stat-label">RUNS MAPPED</span>
@@ -1480,13 +1504,27 @@ async function renderHeatmap() {
       </div>
       <div class="heatmap-stat">
         <span class="heatmap-stat-label">UNIQUE POINTS</span>
-        <span class="heatmap-stat-val">${uniquePoints.toLocaleString()}</span>
+        <span class="heatmap-stat-val">${allHeatPoints.length.toLocaleString()}</span>
       </div>
     `;
+  }, 500);
+}
 
-    // Second invalidate after stats render
-    setTimeout(() => heatLeafletMap.invalidateSize(true), 200);
-  }, 600);
+function weightToColor(w) {
+  // Returns an rgba string with placeholder alpha 'A'
+  if (w < 0.25) {
+    const t = w / 0.25;
+    return `rgba(${Math.round(26 + t*0)}, ${Math.round(0 + t*180)}, ${Math.round(255)}, A)`;
+  } else if (w < 0.5) {
+    const t = (w - 0.25) / 0.25;
+    return `rgba(${Math.round(26 + t*229)}, ${Math.round(180 + t*75)}, ${Math.round(255 - t*255)}, A)`;
+  } else if (w < 0.75) {
+    const t = (w - 0.5) / 0.25;
+    return `rgba(255, ${Math.round(255 - t*93)}, ${Math.round(0)}, A)`;
+  } else {
+    const t = (w - 0.75) / 0.25;
+    return `rgba(255, ${Math.round(162 - t*162)}, 0, A)`;
+  }
 }
 
 // ─── Most Recent Run Map ──────────────────────────────────────────────────────
