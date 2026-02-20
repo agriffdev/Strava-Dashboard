@@ -674,8 +674,9 @@
     height: 100% !important;
   }
 
-  /* Dark tiles for heatmap — no invert, keep dark base map */
-  #heatmap .leaflet-tile { filter: brightness(0.3) contrast(1.2); }
+  /* Dark tiles for heatmap — subtle darkening only, don't wash out heat layer */
+  #heatmap .leaflet-tile { filter: brightness(0.45) saturate(0.3); }
+  #heatmap .leaflet-heatmap-layer { z-index: 999 !important; opacity: 1 !important; }
 
   .heatmap-overlay {
     position: absolute;
@@ -1437,17 +1438,17 @@ async function renderHeatmap() {
 
   // Add heatmap layer using Leaflet.heat
   const heat = L.heatLayer(heatPoints, {
-    radius: 18,
-    blur: 15,
+    radius: 25,
+    blur: 20,
     maxZoom: 17,
-    max: 1.0,
-    minOpacity: 0.5,
+    max: 0.3,
+    minOpacity: 0.7,
     gradient: {
-      0.0: '#0000ff',
-      0.2: '#00ffff',
-      0.4: '#00ff00',
-      0.6: '#ffff00',
-      0.8: '#ff8800',
+      0.0: '#1a00ff',
+      0.25: '#00ccff',
+      0.5: '#00ff88',
+      0.7: '#ffee00',
+      0.85: '#ff8800',
       1.0: '#ff0000'
     }
   }).addTo(heatLeafletMap);
