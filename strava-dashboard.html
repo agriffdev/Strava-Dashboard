@@ -1,0 +1,1141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Physical Intelligence — Strava Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --orange: #FC4C02;
+    --orange-dim: #ff6a2e22;
+    --black: #0a0a0a;
+    --surface: #111111;
+    --surface2: #1a1a1a;
+    --border: #2a2a2a;
+    --text: #e8e8e8;
+    --muted: #666;
+    --green: #00e5a0;
+    --mono: 'DM Mono', monospace;
+    --display: 'Bebas Neue', sans-serif;
+    --sans: 'DM Sans', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--black);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Grain overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 1000;
+    opacity: 0.4;
+  }
+
+  /* Header */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 24px 40px;
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    background: rgba(10,10,10,0.95);
+    backdrop-filter: blur(12px);
+    z-index: 100;
+  }
+
+  .logo {
+    font-family: var(--display);
+    font-size: 22px;
+    letter-spacing: 3px;
+    color: var(--orange);
+  }
+
+  .logo span { color: var(--text); }
+
+  .header-tag {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+
+  /* Auth section */
+  #auth-section {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 80vh;
+    padding: 40px;
+    text-align: center;
+    animation: fadeUp 0.6s ease forwards;
+  }
+
+  .auth-eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--orange);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-bottom: 24px;
+  }
+
+  .auth-title {
+    font-family: var(--display);
+    font-size: clamp(52px, 8vw, 100px);
+    line-height: 0.92;
+    letter-spacing: 2px;
+    margin-bottom: 24px;
+    background: linear-gradient(135deg, #fff 0%, #888 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .auth-sub {
+    font-size: 15px;
+    color: var(--muted);
+    max-width: 460px;
+    line-height: 1.7;
+    margin-bottom: 48px;
+    font-weight: 300;
+  }
+
+  .config-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 32px;
+    width: 100%;
+    max-width: 480px;
+    text-align: left;
+    margin-bottom: 24px;
+  }
+
+  .config-box h3 {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 2px;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 20px;
+  }
+
+  .field {
+    margin-bottom: 16px;
+  }
+
+  .field label {
+    display: block;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+  }
+
+  .field input {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 14px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  .field input:focus { border-color: var(--orange); }
+  .field input::placeholder { color: var(--muted); }
+
+  .btn-primary {
+    width: 100%;
+    background: var(--orange);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 14px 24px;
+    font-family: var(--display);
+    font-size: 18px;
+    letter-spacing: 2px;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-top: 8px;
+  }
+
+  .btn-primary:hover {
+    background: #e04400;
+    transform: translateY(-1px);
+    box-shadow: 0 8px 24px rgba(252,76,2,0.3);
+  }
+
+  .btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  .hint {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    text-align: center;
+    line-height: 1.6;
+  }
+
+  .hint a { color: var(--orange); text-decoration: none; }
+  .hint a:hover { text-decoration: underline; }
+
+  /* Token input section */
+  #token-section {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 80vh;
+    padding: 40px;
+    text-align: center;
+  }
+
+  /* Dashboard */
+  #dashboard {
+    display: none;
+    padding: 40px;
+    max-width: 1400px;
+    margin: 0 auto;
+    animation: fadeUp 0.5s ease forwards;
+  }
+
+  .dashboard-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    margin-bottom: 40px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+
+  .athlete-info h1 {
+    font-family: var(--display);
+    font-size: clamp(36px, 5vw, 64px);
+    letter-spacing: 2px;
+    line-height: 1;
+    margin-bottom: 6px;
+  }
+
+  .athlete-info p {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+    letter-spacing: 1px;
+  }
+
+  .status-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    background: var(--green);
+    border-radius: 50%;
+    margin-right: 8px;
+    animation: pulse 2s infinite;
+  }
+
+  /* Stats grid */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 32px;
+  }
+
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.2s;
+  }
+
+  .stat-card:hover { border-color: var(--orange); }
+
+  .stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--orange), transparent);
+  }
+
+  .stat-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+
+  .stat-value {
+    font-family: var(--display);
+    font-size: 42px;
+    letter-spacing: 1px;
+    line-height: 1;
+    color: var(--text);
+  }
+
+  .stat-unit {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+
+  /* Two column layout */
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin-bottom: 24px;
+  }
+
+  @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
+
+  /* Panel */
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 28px;
+  }
+
+  .panel-title {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .panel-title::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* Activity list */
+  .activity-item {
+    display: grid;
+    grid-template-columns: 1fr auto auto auto;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--border);
+    transition: all 0.15s;
+  }
+
+  .activity-item:last-child { border-bottom: none; }
+  .activity-item:hover { padding-left: 8px; }
+
+  .activity-name {
+    font-size: 14px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .activity-date {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+  }
+
+  .activity-dist {
+    font-family: var(--display);
+    font-size: 20px;
+    color: var(--orange);
+    white-space: nowrap;
+  }
+
+  .activity-pace {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  /* Chart */
+  .chart-area {
+    height: 180px;
+    position: relative;
+    margin-top: 8px;
+  }
+
+  canvas { width: 100% !important; }
+
+  /* AI Insight panel */
+  .insight-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 28px;
+    margin-bottom: 24px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .insight-panel::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--green), var(--orange));
+  }
+
+  .insight-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .ai-badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: var(--green);
+    border: 1px solid var(--green);
+    border-radius: 4px;
+    padding: 3px 8px;
+    text-transform: uppercase;
+  }
+
+  .insight-title {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+
+  #insight-text {
+    font-size: 15px;
+    line-height: 1.75;
+    color: var(--text);
+    font-weight: 300;
+    white-space: pre-wrap;
+  }
+
+  .insight-loading {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+
+  .spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--border);
+    border-top-color: var(--orange);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  .btn-insight {
+    background: transparent;
+    border: 1px solid var(--green);
+    color: var(--green);
+    border-radius: 6px;
+    padding: 8px 16px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-top: 16px;
+  }
+
+  .btn-insight:hover {
+    background: var(--green);
+    color: var(--black);
+  }
+
+  /* Month chart bars */
+  .bar-chart {
+    display: flex;
+    align-items: flex-end;
+    gap: 4px;
+    height: 120px;
+    margin-top: 16px;
+  }
+
+  .bar-wrap {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    height: 100%;
+    justify-content: flex-end;
+  }
+
+  .bar {
+    width: 100%;
+    background: var(--orange);
+    border-radius: 3px 3px 0 0;
+    transition: height 0.8s cubic-bezier(0.16,1,0.3,1);
+    min-height: 2px;
+    opacity: 0.8;
+  }
+
+  .bar:hover { opacity: 1; }
+
+  .bar-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--muted);
+    letter-spacing: 0.5px;
+  }
+
+  /* PR table */
+  .pr-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .pr-item {
+    background: var(--surface2);
+    border-radius: 8px;
+    padding: 16px;
+    border-left: 2px solid var(--orange);
+  }
+
+  .pr-dist { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  .pr-time { font-family: var(--display); font-size: 28px; color: var(--text); }
+  .pr-date { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-top: 4px; }
+
+  /* Loading overlay */
+  #loading {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: var(--black);
+    z-index: 500;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .load-text {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--muted);
+    letter-spacing: 2px;
+  }
+
+  .load-bar {
+    width: 200px;
+    height: 2px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .load-fill {
+    height: 100%;
+    background: var(--orange);
+    border-radius: 2px;
+    animation: loadProgress 2s ease forwards;
+  }
+
+  /* Error */
+  .error-msg {
+    background: rgba(255,60,60,0.1);
+    border: 1px solid rgba(255,60,60,0.3);
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: #ff6b6b;
+    margin-top: 12px;
+    display: none;
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  @keyframes loadProgress {
+    from { width: 0; }
+    to { width: 100%; }
+  }
+
+  .full-width { grid-column: 1 / -1; }
+  .tag { display: inline-block; background: var(--orange-dim); color: var(--orange); font-family: var(--mono); font-size: 10px; letter-spacing: 1px; padding: 2px 8px; border-radius: 3px; margin-right: 6px; }
+</style>
+</head>
+<body>
+
+<!-- Loading -->
+<div id="loading">
+  <div style="font-family:'Bebas Neue',sans-serif;font-size:36px;letter-spacing:4px;color:#FC4C02;">LOADING</div>
+  <div class="load-bar"><div class="load-fill"></div></div>
+  <div class="load-text" id="load-status">CONNECTING TO STRAVA API</div>
+</div>
+
+<!-- Header -->
+<header>
+  <div class="logo">PHYSICAL<span>INTEL</span></div>
+  <div class="header-tag">STRAVA × CLAUDE AI — SENSOR DASHBOARD v1.0</div>
+</header>
+
+<!-- Auth Section -->
+<div id="auth-section">
+  <div class="auth-eyebrow">● Physical World Data Platform</div>
+  <h1 class="auth-title">YOUR BODY<br>AS A<br>SENSOR</h1>
+  <p class="auth-sub">Connect your Strava account to transform your real-world movement data into AI-powered intelligence — pace trends, recovery patterns, and predictive insights.</p>
+
+  <div class="config-box">
+    <h3>Strava API Configuration</h3>
+    <div class="field">
+      <label>CLIENT ID</label>
+      <input type="text" id="client-id" placeholder="e.g. 123456">
+    </div>
+    <div class="field">
+      <label>CLIENT SECRET</label>
+      <input type="password" id="client-secret" placeholder="Your Strava app client secret">
+    </div>
+    <button class="btn-primary" id="auth-btn" onclick="startAuth()">CONNECT TO STRAVA →</button>
+    <div class="error-msg" id="auth-error"></div>
+  </div>
+
+  <div class="hint">
+    Don't have an API app yet? <a href="https://www.strava.com/settings/api" target="_blank">Create one at strava.com/settings/api</a><br>
+    Set the Authorization Callback Domain to <strong>localhost</strong> or your domain.
+  </div>
+</div>
+
+<!-- Token exchange section (after OAuth redirect) -->
+<div id="token-section">
+  <div class="auth-eyebrow">● Almost there</div>
+  <h1 style="font-family:'Bebas Neue',sans-serif;font-size:64px;letter-spacing:2px;margin-bottom:24px;">FINALISE<br>CONNECTION</h1>
+  <p style="color:var(--muted);margin-bottom:32px;font-size:14px;max-width:420px;line-height:1.7;">Strava redirected you back with an authorization code. Enter your credentials below to complete the connection.</p>
+
+  <div class="config-box">
+    <h3>Complete Authentication</h3>
+    <div class="field">
+      <label>CLIENT ID</label>
+      <input type="text" id="t-client-id" placeholder="Your Strava Client ID">
+    </div>
+    <div class="field">
+      <label>CLIENT SECRET</label>
+      <input type="password" id="t-client-secret" placeholder="Your Strava Client Secret">
+    </div>
+    <div class="field">
+      <label>AUTHORIZATION CODE <span style="color:var(--orange)">(auto-filled if redirected)</span></label>
+      <input type="text" id="t-auth-code" placeholder="Code from Strava redirect URL">
+    </div>
+    <button class="btn-primary" onclick="exchangeToken()">LOAD MY DATA →</button>
+    <div class="error-msg" id="token-error"></div>
+  </div>
+
+  <p class="hint">The auth code from Strava expires in minutes — complete this quickly.</p>
+</div>
+
+<!-- Dashboard -->
+<div id="dashboard">
+  <div class="dashboard-header">
+    <div class="athlete-info">
+      <h1 id="athlete-name">ATHLETE</h1>
+      <p><span class="status-dot"></span><span id="athlete-meta">Loading...</span></p>
+    </div>
+    <div style="text-align:right">
+      <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);letter-spacing:1px;" id="last-updated"></div>
+      <div style="margin-top:8px;">
+        <span class="tag">STRAVA API</span>
+        <span class="tag">CLAUDE AI</span>
+        <span class="tag">PHYSICAL DATA</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Key Stats -->
+  <div class="stats-grid" id="stats-grid">
+    <div class="stat-card">
+      <div class="stat-label">Total Activities</div>
+      <div class="stat-value" id="stat-count">—</div>
+      <div class="stat-unit">all time runs</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Total Distance</div>
+      <div class="stat-value" id="stat-dist">—</div>
+      <div class="stat-unit">kilometres</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Total Elevation</div>
+      <div class="stat-value" id="stat-elev">—</div>
+      <div class="stat-unit">metres climbed</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Total Time</div>
+      <div class="stat-value" id="stat-time">—</div>
+      <div class="stat-unit">hours moving</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Avg Pace</div>
+      <div class="stat-value" id="stat-pace">—</div>
+      <div class="stat-unit">min/km average</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Longest Run</div>
+      <div class="stat-value" id="stat-longest">—</div>
+      <div class="stat-unit">kilometres</div>
+    </div>
+  </div>
+
+  <!-- AI Insight -->
+  <div class="insight-panel">
+    <div class="insight-header">
+      <span class="ai-badge">AI INSIGHT</span>
+      <span class="insight-title">Physical Intelligence Analysis</span>
+    </div>
+    <div id="insight-text"><div class="insight-loading"><div class="spinner"></div>Analysing your movement data...</div></div>
+    <button class="btn-insight" onclick="getInsight()" id="insight-btn" style="display:none">↻ REGENERATE INSIGHT</button>
+  </div>
+
+  <!-- Charts + Recent -->
+  <div class="two-col">
+    <div class="panel">
+      <div class="panel-title">Monthly Distance (km)</div>
+      <div class="bar-chart" id="month-bars"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Recent Activities</div>
+      <div id="activity-list"></div>
+    </div>
+  </div>
+
+  <!-- PRs -->
+  <div class="panel" style="margin-bottom:40px">
+    <div class="panel-title">Best Efforts</div>
+    <div class="pr-grid" id="pr-grid">
+      <div style="font-family:'DM Mono',monospace;font-size:12px;color:var(--muted);">Loading best efforts...</div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── State ────────────────────────────────────────────────────────────────────
+let accessToken = null;
+let allActivities = [];
+let athleteData = null;
+
+// ─── On Load: check for OAuth code ───────────────────────────────────────────
+window.onload = () => {
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get('code');
+  if (code) {
+    document.getElementById('auth-section').style.display = 'none';
+    document.getElementById('token-section').style.display = 'flex';
+    document.getElementById('t-auth-code').value = code;
+    // restore saved creds
+    const saved = JSON.parse(sessionStorage.getItem('strava_creds') || '{}');
+    if (saved.id) document.getElementById('t-client-id').value = saved.id;
+    if (saved.secret) document.getElementById('t-client-secret').value = saved.secret;
+  }
+  // check for saved token
+  const savedToken = sessionStorage.getItem('strava_token');
+  if (savedToken) {
+    accessToken = savedToken;
+    document.getElementById('auth-section').style.display = 'none';
+    loadDashboard();
+  }
+};
+
+// ─── Auth ─────────────────────────────────────────────────────────────────────
+function startAuth() {
+  const id = document.getElementById('client-id').value.trim();
+  const secret = document.getElementById('client-secret').value.trim();
+  const err = document.getElementById('auth-error');
+
+  if (!id || !secret) {
+    err.textContent = 'Please enter both Client ID and Client Secret.';
+    err.style.display = 'block';
+    return;
+  }
+
+  sessionStorage.setItem('strava_creds', JSON.stringify({ id, secret }));
+
+  const redirect = window.location.href.split('?')[0];
+  const scope = 'read,activity:read_all';
+  const url = `https://www.strava.com/oauth/authorize?client_id=${id}&redirect_uri=${encodeURIComponent(redirect)}&response_type=code&approval_prompt=force&scope=${scope}`;
+  window.location.href = url;
+}
+
+async function exchangeToken() {
+  const id = document.getElementById('t-client-id').value.trim();
+  const secret = document.getElementById('t-client-secret').value.trim();
+  const code = document.getElementById('t-auth-code').value.trim();
+  const err = document.getElementById('token-error');
+
+  if (!id || !secret || !code) {
+    err.textContent = 'All fields are required.';
+    err.style.display = 'block';
+    return;
+  }
+
+  showLoading('EXCHANGING AUTHORIZATION CODE');
+
+  try {
+    const resp = await fetch('https://www.strava.com/oauth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_id: id, client_secret: secret, code, grant_type: 'authorization_code' })
+    });
+
+    if (!resp.ok) throw new Error(`Token exchange failed: ${resp.status}`);
+    const data = await resp.json();
+
+    if (!data.access_token) throw new Error(data.message || 'No access token returned');
+
+    accessToken = data.access_token;
+    sessionStorage.setItem('strava_token', accessToken);
+
+    // Clear URL params
+    window.history.replaceState({}, document.title, window.location.pathname);
+
+    document.getElementById('token-section').style.display = 'none';
+    await loadDashboard();
+  } catch (e) {
+    hideLoading();
+    err.textContent = e.message;
+    err.style.display = 'block';
+  }
+}
+
+// ─── Load Dashboard ───────────────────────────────────────────────────────────
+async function loadDashboard() {
+  showLoading('CONNECTING TO STRAVA API');
+
+  try {
+    // Fetch athlete
+    setLoadStatus('FETCHING ATHLETE PROFILE');
+    const athleteResp = await fetch('https://www.strava.com/api/v3/athlete', {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    if (!athleteResp.ok) throw new Error('Failed to fetch athlete. Token may be expired.');
+    athleteData = await athleteResp.json();
+
+    // Fetch ALL activities (paginated)
+    setLoadStatus('LOADING ALL ACTIVITIES — THIS MAY TAKE A MOMENT');
+    allActivities = await fetchAllActivities();
+
+    // Filter runs only
+    allActivities = allActivities.filter(a => a.type === 'Run' || a.sport_type === 'Run');
+
+    setLoadStatus('COMPUTING INSIGHTS');
+    hideLoading();
+
+    document.getElementById('dashboard').style.display = 'block';
+    renderDashboard();
+
+    // Trigger AI insight
+    setTimeout(getInsight, 800);
+  } catch (e) {
+    hideLoading();
+    document.getElementById('auth-section').style.display = 'flex';
+    alert('Error: ' + e.message + '\n\nYour session may have expired. Please reconnect.');
+    sessionStorage.removeItem('strava_token');
+  }
+}
+
+async function fetchAllActivities() {
+  const all = [];
+  let page = 1;
+  while (true) {
+    const resp = await fetch(
+      `https://www.strava.com/api/v3/athlete/activities?per_page=200&page=${page}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    if (!resp.ok) break;
+    const batch = await resp.json();
+    if (!batch.length) break;
+    all.push(...batch);
+    page++;
+    if (batch.length < 200) break;
+  }
+  return all;
+}
+
+// ─── Render ───────────────────────────────────────────────────────────────────
+function renderDashboard() {
+  const runs = allActivities;
+
+  // Athlete header
+  document.getElementById('athlete-name').textContent =
+    `${athleteData.firstname} ${athleteData.lastname}`.toUpperCase();
+  document.getElementById('athlete-meta').textContent =
+    `${athleteData.city || ''} ${athleteData.country || ''} · ${runs.length} runs loaded`.trim();
+  document.getElementById('last-updated').textContent =
+    'SYNCED ' + new Date().toLocaleString().toUpperCase();
+
+  // Aggregate stats
+  const totalDist = runs.reduce((s, a) => s + a.distance, 0) / 1000;
+  const totalElev = runs.reduce((s, a) => s + (a.total_elevation_gain || 0), 0);
+  const totalTime = runs.reduce((s, a) => s + a.moving_time, 0);
+  const longestRun = Math.max(...runs.map(a => a.distance)) / 1000;
+
+  // Avg pace (min/km) from moving_time and distance
+  const totalDistM = runs.reduce((s, a) => s + a.distance, 0);
+  const avgPaceSec = totalDistM > 0 ? (totalTime / (totalDistM / 1000)) : 0;
+  const avgPaceMin = Math.floor(avgPaceSec / 60);
+  const avgPaceSec2 = Math.round(avgPaceSec % 60);
+
+  document.getElementById('stat-count').textContent = runs.length;
+  document.getElementById('stat-dist').textContent = totalDist.toFixed(0);
+  document.getElementById('stat-elev').textContent = totalElev.toFixed(0);
+  document.getElementById('stat-time').textContent = (totalTime / 3600).toFixed(0);
+  document.getElementById('stat-pace').textContent =
+    avgPaceSec > 0 ? `${avgPaceMin}:${String(avgPaceSec2).padStart(2,'0')}` : '—';
+  document.getElementById('stat-longest').textContent = longestRun.toFixed(1);
+
+  // Monthly distance bar chart
+  renderMonthChart(runs);
+
+  // Recent activities (last 10)
+  renderRecentActivities(runs.slice(0, 10));
+
+  // Best efforts / PRs
+  renderBestEfforts(runs);
+}
+
+function renderMonthChart(runs) {
+  const months = {};
+  runs.forEach(r => {
+    const d = new Date(r.start_date);
+    const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    months[key] = (months[key] || 0) + r.distance / 1000;
+  });
+
+  const sorted = Object.entries(months).sort((a,b) => a[0].localeCompare(b[0]));
+  // Last 12 months
+  const recent = sorted.slice(-12);
+  const maxVal = Math.max(...recent.map(m => m[1]));
+
+  const container = document.getElementById('month-bars');
+  container.innerHTML = '';
+
+  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  recent.forEach(([key, val]) => {
+    const [yr, mo] = key.split('-');
+    const pct = (val / maxVal) * 100;
+    const wrap = document.createElement('div');
+    wrap.className = 'bar-wrap';
+    wrap.title = `${monthNames[parseInt(mo)-1]} ${yr}: ${val.toFixed(1)} km`;
+    wrap.innerHTML = `
+      <div class="bar" style="height:${pct}%"></div>
+      <div class="bar-label">${monthNames[parseInt(mo)-1]}</div>
+    `;
+    container.appendChild(wrap);
+  });
+}
+
+function renderRecentActivities(runs) {
+  const container = document.getElementById('activity-list');
+  container.innerHTML = '';
+
+  runs.forEach(r => {
+    const dist = (r.distance / 1000).toFixed(2);
+    const pace = r.distance > 0
+      ? (() => {
+          const s = r.moving_time / (r.distance / 1000);
+          return `${Math.floor(s/60)}:${String(Math.round(s%60)).padStart(2,'0')}/km`;
+        })()
+      : '—';
+    const date = new Date(r.start_date).toLocaleDateString('en-GB', { day:'numeric', month:'short' });
+
+    const el = document.createElement('div');
+    el.className = 'activity-item';
+    el.innerHTML = `
+      <div>
+        <div class="activity-name">${r.name}</div>
+        <div class="activity-date">${date}</div>
+      </div>
+      <div class="activity-dist">${dist}<span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">km</span></div>
+      <div class="activity-pace">${pace}</div>
+    `;
+    container.appendChild(el);
+  });
+}
+
+function renderBestEfforts(runs) {
+  // Approximate best times by grouping distances
+  const buckets = {
+    '5K': { min: 4.9, max: 5.15 },
+    '10K': { min: 9.9, max: 10.15 },
+    'Half Marathon': { min: 20.9, max: 21.5 },
+    'Marathon': { min: 41.8, max: 42.5 }
+  };
+
+  const prs = {};
+  runs.forEach(r => {
+    const dist = r.distance / 1000;
+    Object.entries(buckets).forEach(([label, range]) => {
+      if (dist >= range.min && dist <= range.max) {
+        if (!prs[label] || r.moving_time < prs[label].time) {
+          prs[label] = { time: r.moving_time, date: r.start_date };
+        }
+      }
+    });
+  });
+
+  const container = document.getElementById('pr-grid');
+
+  // Also find longest and fastest short runs
+  if (Object.keys(prs).length === 0) {
+    container.innerHTML = '<div style="font-family:\'DM Mono\',monospace;font-size:12px;color:var(--muted);grid-column:1/-1;">No standard race distances found in your history. Try filtering shorter or longer runs!</div>';
+    return;
+  }
+
+  container.innerHTML = '';
+  Object.entries(prs).forEach(([dist, data]) => {
+    const h = Math.floor(data.time / 3600);
+    const m = Math.floor((data.time % 3600) / 60);
+    const s = data.time % 60;
+    const timeStr = h > 0
+      ? `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`
+      : `${m}:${String(s).padStart(2,'0')}`;
+    const dateStr = new Date(data.date).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' });
+
+    const el = document.createElement('div');
+    el.className = 'pr-item';
+    el.innerHTML = `
+      <div class="pr-dist">${dist}</div>
+      <div class="pr-time">${timeStr}</div>
+      <div class="pr-date">Best — ${dateStr}</div>
+    `;
+    container.appendChild(el);
+  });
+}
+
+// ─── Claude AI Insight ────────────────────────────────────────────────────────
+async function getInsight() {
+  const btn = document.getElementById('insight-btn');
+  const textEl = document.getElementById('insight-text');
+  btn.style.display = 'none';
+  textEl.innerHTML = '<div class="insight-loading"><div class="spinner"></div>Analysing your physical data with Claude AI...</div>';
+
+  // Build summary for Claude
+  const runs = allActivities;
+  const totalDist = (runs.reduce((s, a) => s + a.distance, 0) / 1000).toFixed(1);
+  const totalRuns = runs.length;
+  const avgDist = (totalDist / totalRuns).toFixed(1);
+
+  // Monthly breakdown last 6 months
+  const monthlyData = {};
+  runs.forEach(r => {
+    const d = new Date(r.start_date);
+    const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    monthlyData[key] = (monthlyData[key] || 0) + r.distance / 1000;
+  });
+  const recentMonths = Object.entries(monthlyData).sort((a,b) => a[0].localeCompare(b[0])).slice(-6);
+
+  const paceData = runs.filter(r => r.distance > 0).map(r => ({
+    dist: (r.distance/1000).toFixed(1),
+    pace: (r.moving_time / (r.distance / 1000)).toFixed(0),
+    date: r.start_date.slice(0,10)
+  })).slice(-20);
+
+  const prompt = `You are a world-class running coach and data analyst. Analyse this athlete's running data and provide a sharp, insightful 3-4 paragraph analysis. Be specific, reference numbers, and give one actionable recommendation.
+
+Athlete: ${athleteData.firstname} ${athleteData.lastname}
+Total runs: ${totalRuns}
+Total distance: ${totalDist} km
+Average run distance: ${avgDist} km
+
+Monthly distances (last 6 months):
+${recentMonths.map(([k,v]) => `${k}: ${v.toFixed(1)} km`).join('\n')}
+
+Recent 20 runs (date, distance km, pace sec/km):
+${paceData.map(r => `${r.date}: ${r.dist}km @ ${Math.floor(r.pace/60)}:${String(r.pace%60).padStart(2,'0')}/km`).join('\n')}
+
+Provide coaching insights on: training volume trends, pace consistency, progression, and one specific actionable tip. Be direct and data-driven. No generic advice.`;
+
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+
+    const data = await response.json();
+    const text = data.content?.[0]?.text || 'Unable to generate insight.';
+    textEl.textContent = text;
+    btn.style.display = 'inline-block';
+  } catch (e) {
+    textEl.textContent = 'AI insight unavailable — Claude API could not be reached. Your dashboard data is still fully functional above.';
+    btn.style.display = 'inline-block';
+  }
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function showLoading(msg) {
+  document.getElementById('loading').style.display = 'flex';
+  document.getElementById('load-status').textContent = msg;
+}
+
+function hideLoading() {
+  document.getElementById('loading').style.display = 'none';
+}
+
+function setLoadStatus(msg) {
+  document.getElementById('load-status').textContent = msg;
+}
+</script>
+</body>
+</html>
