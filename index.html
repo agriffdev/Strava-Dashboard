@@ -965,7 +965,7 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.heat/0.2.0/leaflet-heat.js"></script>
+<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
 <script>
 let accessToken = null;
 let allActivities = [];
@@ -1358,6 +1358,15 @@ function switchTab(tab) {
 let heatLeafletMap = null;
 
 async function renderHeatmap() {
+  // Check Leaflet.heat loaded
+  if (typeof L.heatLayer === 'undefined') {
+    document.getElementById('heatmap-loading').innerHTML = `
+      <h3 style="color:#ff6b6b">PLUGIN ERROR</h3>
+      <p style="color:var(--muted)">Leaflet.heat failed to load.<br>Check your internet connection and try refreshing.</p>
+    `;
+    return;
+  }
+
   const runs = allActivities.slice(0, 100);
   const totalRuns = runs.length;
   let processed = 0;
@@ -1379,11 +1388,11 @@ async function renderHeatmap() {
     if (!poly) { processed++; continue; }
 
     const coords = decodePolyline(poly);
-    // Sample every Nth point to keep performance smooth
-    const step = Math.max(1, Math.floor(coords.length / 40));
+    // Sample every 2nd point — keeps density high while staying performant
+    const step = Math.max(1, Math.floor(coords.length / 200));
     for (let i = 0; i < coords.length; i += step) {
-      // Round to ~50m grid for frequency counting
-      const key = `${(coords[i][0]).toFixed(3)},${(coords[i][1]).toFixed(3)}`;
+      // Round to ~25m grid for frequency counting
+      const key = `${(coords[i][0]).toFixed(4)},${(coords[i][1]).toFixed(4)}`;
       pointMap[key] = (pointMap[key] || 0) + 1;
     }
 
@@ -1414,10 +1423,11 @@ async function renderHeatmap() {
 
   // Add heatmap layer using Leaflet.heat
   const heat = L.heatLayer(heatPoints, {
-    radius: 14,
-    blur: 18,
+    radius: 18,
+    blur: 15,
     maxZoom: 17,
     max: 1.0,
+    minOpacity: 0.5,
     gradient: {
       0.0: '#0000ff',
       0.2: '#00ffff',
