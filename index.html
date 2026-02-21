@@ -892,10 +892,11 @@
     </div>
     <div style="text-align:right">
       <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);letter-spacing:1px;" id="last-updated"></div>
-      <div style="margin-top:8px;">
+      <div style="margin-top:8px;display:flex;align-items:center;gap:8px;justify-content:flex-end;">
         <span class="tag">STRAVA API</span>
         <span class="tag">CLAUDE AI</span>
         <span class="tag">PHYSICAL DATA</span>
+        <button onclick="logout()" style="background:none;border:1px solid var(--border);color:var(--muted);font-family:'DM Mono',monospace;font-size:10px;letter-spacing:1px;padding:3px 10px;border-radius:4px;cursor:pointer;transition:all 0.2s;" onmouseover="this.style.borderColor='#ff4444';this.style.color='#ff4444'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">LOGOUT</button>
       </div>
     </div>
   </div>
@@ -1040,12 +1041,17 @@ window.onload = () => {
     document.getElementById('token-section').style.display = 'flex';
     document.getElementById('t-auth-code').value = code;
     // restore saved creds
-    const saved = JSON.parse(sessionStorage.getItem('strava_creds') || '{}');
+    const saved = JSON.parse(localStorage.getItem('strava_creds') || '{}');
     if (saved.id) document.getElementById('t-client-id').value = saved.id;
     if (saved.secret) document.getElementById('t-client-secret').value = saved.secret;
+  } else {
+    // Auto-fill creds on the main auth page too
+    const saved = JSON.parse(localStorage.getItem('strava_creds') || '{}');
+    if (saved.id) document.getElementById('client-id').value = saved.id;
+    if (saved.secret) document.getElementById('client-secret').value = saved.secret;
   }
   // check for saved token
-  const savedToken = sessionStorage.getItem('strava_token');
+  const savedToken = localStorage.getItem('strava_token');
   if (savedToken) {
     accessToken = savedToken;
     document.getElementById('auth-section').style.display = 'none';
@@ -1065,7 +1071,7 @@ function startAuth() {
     return;
   }
 
-  sessionStorage.setItem('strava_creds', JSON.stringify({ id, secret }));
+  localStorage.setItem('strava_creds', JSON.stringify({ id, secret }));
 
   const redirect = window.location.href.split('?')[0];
   const scope = 'read,activity:read_all';
@@ -1100,7 +1106,12 @@ async function exchangeToken() {
     if (!data.access_token) throw new Error(data.message || 'No access token returned');
 
     accessToken = data.access_token;
-    sessionStorage.setItem('strava_token', accessToken);
+    localStorage.setItem('strava_token', data.access_token);
+    // Save refresh token and expiry for silent re-auth
+    if (data.refresh_token) localStorage.setItem('strava_refresh_token', data.refresh_token);
+    if (data.expires_at) localStorage.setItem('strava_token_expiry', data.expires_at);
+    // Save client creds for refresh flow
+    localStorage.setItem('strava_creds', JSON.stringify({ id, secret }));
 
     // Clear URL params
     window.history.replaceState({}, document.title, window.location.pathname);
@@ -1119,6 +1130,29 @@ async function loadDashboard() {
   showLoading('CONNECTING TO STRAVA API');
 
   try {
+    // Silent token refresh if expired
+    const expiry = parseInt(localStorage.getItem('strava_token_expiry') || '0');
+    const now = Math.floor(Date.now() / 1000);
+    if (expiry && now >= expiry - 300) {
+      // Token expired or expiring in 5 mins — refresh silently
+      const creds = JSON.parse(localStorage.getItem('strava_creds') || '{}');
+      const refreshToken = localStorage.getItem('strava_refresh_token');
+      if (creds.id && creds.secret && refreshToken) {
+        setLoadStatus('REFRESHING SESSION...');
+        const r = await fetch('https://www.strava.com/oauth/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ client_id: creds.id, client_secret: creds.secret, refresh_token: refreshToken, grant_type: 'refresh_token' })
+        });
+        if (r.ok) {
+          const d = await r.json();
+          accessToken = d.access_token;
+          localStorage.setItem('strava_token', d.access_token);
+          if (d.refresh_token) localStorage.setItem('strava_refresh_token', d.refresh_token);
+          if (d.expires_at) localStorage.setItem('strava_token_expiry', d.expires_at);
+        }
+      }
+    }
     // Fetch athlete
     setLoadStatus('FETCHING ATHLETE PROFILE');
     const athleteResp = await fetch('https://www.strava.com/api/v3/athlete', {
@@ -1148,7 +1182,9 @@ async function loadDashboard() {
     hideLoading();
     document.getElementById('auth-section').style.display = 'flex';
     alert('Error: ' + e.message + '\n\nYour session may have expired. Please reconnect.');
-    sessionStorage.removeItem('strava_token');
+    localStorage.removeItem('strava_token');
+    localStorage.removeItem('strava_token_expiry');
+    localStorage.removeItem('strava_refresh_token');
   }
 }
 
@@ -1893,6 +1929,13 @@ function renderTempCharts(runData) {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+function logout() {
+  localStorage.removeItem('strava_token');
+  localStorage.removeItem('strava_token_expiry');
+  localStorage.removeItem('strava_refresh_token');
+  window.location.reload();
+}
+
 function showLoading(msg) {
   document.getElementById('loading').style.display = 'flex';
   document.getElementById('load-status').textContent = msg;
